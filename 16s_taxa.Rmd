@@ -1,0 +1,1279 @@
+---
+title: "translocation_manu_16S_taxa"
+author: "Songjun"
+date: "2025-02-03"
+output: html_document
+---
+
+#load package
+```{r load backage} 
+library(tidyverse)
+library(gridExtra)
+library(ggplot2)
+library(reshape2)
+library(ggrepel)
+library(vegan)
+library(viridis)
+library(cowplot)
+library(phyloseq)
+library(SRS)
+library(ANCOMBC)
+library(ggpubr)
+library(zCompositions)
+library(readxl)
+library(ggpubr)
+library(emmeans)
+library(dplyr)
+library(kableExtra)
+library(lme4)
+library(lmerTest)
+library(tidyr)
+library(ggeffects)
+library(purrr)
+library(gllvm)
+
+
+
+#many different colours
+library(RColorBrewer)
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+```
+
+#load data
+#load resident cores data
+```{r load data}
+
+sample_meta_data_res <- read.csv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_ori_core/metadata.csv", sep=";")
+sample_meta_data_res$Depth<-as.character(sample_meta_data_res$Depth)
+sample_meta_data_res$Depth<-factor(sample_meta_data_res$Depth,levels = c("0","1","8","15","22","29"))
+sample_meta_data_res$Core<-paste("Resident")
+sample_meta_data_res$Time<-paste("T1")
+sample_meta_data_res$Bay<-gsub('warm','heated',sample_meta_data_res$Bay)
+sample_meta_data_res <- sample_meta_data_res %>%
+  mutate(Core_ID = paste(Site, Core, sep = "_"))
+
+
+feature_table_res<- read_tsv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_ori_core/ASV_table.tsv")
+
+taxonomy_res<- read_tsv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_ori_core/ASV_tax_species.sbdi-gtdb.tsv")
+#replace NA to 'unidentified'
+taxonomy_res[is.na(taxonomy_res)]<-"unidentified"
+
+asvs_res<-feature_table_res%>%
+  gather(sample, count, 2:ncol(.)) %>% 
+  filter(count > 0) %>%
+  group_by(sample) %>% 
+  mutate(relab = count/sum(count)) %>% 
+  filter(n() > 10) %>% 
+  ungroup()
+
+feature_table_res%>%
+  gather(sample, count, -1)%>%
+  group_by(ASV_ID)%>%
+  #filter(count > 0) %>% 
+  ungroup() %>%
+  mutate(count = as.integer(count))%>%
+  # Add metadata
+ inner_join(sample_meta_data_res, by = 'sample')%>%
+  # Relative abundance, grouped first by sample name, and then next by rep(sampling replicate identifier)
+  group_by(sample) %>%
+  #group_by(rep)%>% #do at sample level first 
+  mutate(relab = count/sum(count)) %>% ungroup() -> seqtab_res
+
+```
+
+#load translocated cores data
+```{r load data}
+
+sample_meta_data_trans <- read.csv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_trans_core/metadata.csv", sep=";")
+sample_meta_data_trans$Depth<-as.character(sample_meta_data_trans$Depth)
+sample_meta_data_trans$Depth<-factor(sample_meta_data_trans$Depth,levels = c("0","1","8","15","22","29"))
+sample_meta_data_trans$Time<-paste("T1")
+sample_meta_data_trans$Core<-paste("Translocated")
+sample_meta_data_trans$Bay<-gsub('warm','heated',sample_meta_data_trans$Bay)
+sample_meta_data_trans <- sample_meta_data_trans %>%
+  mutate(Core_ID = paste(Site, Core, sep = "_"))
+
+feature_table_trans<- read_tsv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_trans_core/ASV_table.tsv")
+
+taxonomy_trans<- read_tsv("~/Desktop/Linnaeus University/OKG /T1 experiment analysis/16S_T1_trans_core/ASV_tax_species.sbdi-gtdb.tsv")
+#replace NA to 'unidentified'
+taxonomy_trans[is.na(taxonomy_trans)]<-"unidentified"
+
+asvs_trans<-feature_table_trans%>%
+  gather(sample, count, 2:ncol(.)) %>% 
+  filter(count > 0) %>%
+  group_by(sample) %>% 
+  mutate(relab = count/sum(count)) %>% 
+  filter(n() > 10) %>% 
+  ungroup()
+
+feature_table_trans%>%
+  gather(sample, count, -1)%>%
+  group_by(ASV_ID)%>%
+  #filter(count > 0) %>% 
+  ungroup() %>%
+  mutate(count = as.integer(count))%>%
+  # Add metadata
+ inner_join(sample_meta_data_trans, by = 'sample')%>%
+  # Relative abundance, grouped first by sample name, and then next by rep(sampling replicate identifier)
+  group_by(sample) %>%
+  #group_by(rep)%>% #do at sample level first 
+  mutate(relab = count/sum(count)) %>% ungroup() -> seqtab_trans
+
+```
+
+#load T0 cores data
+```{r}
+sample_meta_data_t0 <- read.csv("~/Desktop/Linnaeus University/OKG /T0 experiment analysis/16S_2021_august_sediment/metadata.csv", sep=";")
+sample_meta_data_t0$Depth<-as.character(sample_meta_data_t0$Depth)
+sample_meta_data_t0$Depth<-factor(sample_meta_data_t0$Depth,levels = c("0","1","8","15","22","29"))
+sample_meta_data_t0$Core<-paste("Resident")
+sample_meta_data_t0$Time<-paste("T0")
+sample_meta_data_t0$Bay<-gsub('warm','heated',sample_meta_data_t0$Bay)
+sample_meta_data_t0 <- sample_meta_data_t0 %>%
+  mutate(Core_ID = paste(Site, Core, sep = "_"))
+
+feature_table_t0<- read_tsv("~/Desktop/Linnaeus University/OKG /T0 experiment analysis/16S_2021_august_sediment/ASV_table.tsv")
+
+taxonomy_t0<- read_tsv("~/Desktop/Linnaeus University/OKG /T0 experiment analysis/16S_2021_august_sediment/ASV_tax_species.sbdi-gtdb.tsv")
+#replace NA to 'unidentified'
+taxonomy_t0[is.na(taxonomy_t0)]<-"unidentified"
+
+asvs_t0<-feature_table_t0%>%
+  gather(sample, count, 2:ncol(.)) %>% 
+  filter(count > 0) %>%
+  group_by(sample) %>% 
+  mutate(relab = count/sum(count)) %>% 
+  filter(n() > 10) %>% 
+  ungroup()
+
+feature_table_t0%>%
+  gather(sample, count, -1)%>%
+  group_by(ASV_ID)%>%
+  #filter(count > 0) %>% 
+  ungroup() %>%
+  mutate(count = as.integer(count))%>%
+  # Add metadata
+ inner_join(sample_meta_data_t0, by = 'sample')%>%
+  # Relative abundance, grouped first by sample name, and then next by rep(sampling replicate identifier)
+  group_by(sample) %>%
+  #group_by(rep)%>% #do at sample level first 
+  mutate(relab = count/sum(count)) %>% ungroup() -> seqtab_t0
+
+sum(asvs_t0$count)
+sum(asvs_res$count)
+sum(asvs_trans$count)
+
+```
+
+#t0 preparation
+```{r}
+
+## sample metadata
+samples_df_T0 <- sample_meta_data_t0
+
+
+
+## OTUs data
+otu_mat_T0<- feature_table_t0
+
+### tax data 
+
+tax_mat_T0<- taxonomy_t0[,1:10]
+
+
+
+### objects need to have row names 
+otu_mat_T0 <- otu_mat_T0 %>%
+    tibble::column_to_rownames("ASV_ID") 
+
+tax_mat_T0 <- tax_mat_T0 %>% 
+    tibble::column_to_rownames("ASV_ID")
+
+ samples_df_T0 <- samples_df_T0 %>% 
+    tibble::column_to_rownames("sample") 
+ 
+ ###convert tax and otu to matrices 
+otu_mat_T0 <- as.matrix(otu_mat_T0)
+tax_mat_T0 <- as.matrix(tax_mat_T0)
+
+## data is T_otu_mat
+#transpose otu matrix so that sites are rows and species are in columns
+T_otu_mat_T0<-t(otu_mat_T0)
+
+trans_otu_mat_T0<-T_otu_mat_T0
+
+trans_otu_mat_T0<-data.frame(sample= row.names(trans_otu_mat_T0), trans_otu_mat_T0)
+
+```
+
+# t1 preparation
+```{r}
+
+## sample metadata
+samples_df_T1 <- rbind(sample_meta_data_res , sample_meta_data_trans)
+
+
+
+## OTUs data
+otu_mat_T1<- merge(feature_table_res,feature_table_trans,by = "ASV_ID",
+                                   all = TRUE)
+#replace NA to 0
+otu_mat_T1[is.na(otu_mat_T1)]<-0
+
+### tax data 
+
+tax_mat_T1<- merge(taxonomy_res[,1:10],taxonomy_trans[,1:10],all = TRUE)
+#remove duplicate
+Dup_tax<-tax_mat_T1[duplicated(tax_mat_T1$ASV_ID),]
+tax_mat_T1<-tax_mat_T1[-as.numeric(row.names.data.frame(Dup_tax)),]
+rownames(tax_mat_T1)<-NULL
+
+
+### objects need to have row names 
+otu_mat_T1 <- otu_mat_T1 %>%
+    tibble::column_to_rownames("ASV_ID") 
+
+tax_mat_T1 <- tax_mat_T1 %>% 
+    tibble::column_to_rownames("ASV_ID")
+
+ samples_df_T1 <- samples_df_T1 %>% 
+    tibble::column_to_rownames("sample") 
+ 
+ ###convert tax and otu to matrices 
+otu_mat_T1 <- as.matrix(otu_mat_T1)
+tax_mat_T1 <- as.matrix(tax_mat_T1)
+
+## data is T_otu_mat_T1
+#transpose otu matrix so that sites are rows and species are in columns
+T_otu_mat_T1<-t(otu_mat_T1)
+
+trans_otu_mat_T1<-T_otu_mat_T1
+
+trans_otu_mat_T1<-data.frame(sample= row.names(trans_otu_mat_T1), trans_otu_mat_T1)
+
+```
+
+
+#rarefaction curve for Suppplemental
+```{r}
+
+
+#rare_curve_t0
+asvs_t0%>%
+ dplyr::select(ASV_ID, sample, count) %>%
+  spread(ASV_ID, count, fill = 0) %>%
+  column_to_rownames("sample")%>%
+rarecurve(sample= 100, step = 100, xlab = "Sequencing Depth", ylab = "# of ASVs",cex=0.4)
+
+#rare_curve_t1_resident_core
+asvs_res%>%
+ dplyr::select(ASV_ID, sample, count) %>%
+  spread(ASV_ID, count, fill = 0) %>%
+  column_to_rownames("sample")%>%
+rarecurve(sample= 100, step = 100, xlab = "Sequencing Depth", ylab = "# of ASVs",cex=0.4)
+
+#rare_curve_t1_translocated_core
+asvs_trans%>%
+ dplyr::select(ASV_ID, sample, count) %>%
+  spread(ASV_ID, count, fill = 0) %>%
+  column_to_rownames("sample")%>%
+rarecurve(sample= 100, step = 100, xlab = "Sequencing Depth", ylab = "# of ASVs",cex=0.4)
+
+
+
+```
+
+
+
+#mix t1 data together
+```{r}
+
+asvs_t1<-rbind(asvs_res,asvs_trans)
+
+taxonomy_t1<-bind_rows(taxonomy_res[,1:9],taxonomy_trans[,1:9])%>% distinct(ASV_ID, .keep_all = TRUE)
+
+
+
+sample_meta_data_t1<-rbind(sample_meta_data_res,sample_meta_data_trans)
+
+```
+
+
+
+
+#relatieve abundance bar plot(family level)
+
+#select top 15 families for all data
+```{r}
+
+taxonomy_all<-bind_rows(taxonomy_t0[,1:9],taxonomy_t1[,1:9])%>% distinct(ASV_ID, .keep_all = TRUE)
+sample_meta_data_all<-rbind(sample_meta_data_t0,sample_meta_data_t1)
+
+p_all<- rbind(asvs_t0,asvs_t1) %>%
+  inner_join(taxonomy_all, by = 'ASV_ID') %>%
+  inner_join(sample_meta_data_all, by = 'sample')%>%
+  group_by(Family, sample) %>%
+  # Calculate the relative abundance of each family in each sample
+  summarise(relab = sum(relab)) %>%
+  # Calculate the *mean* relative abundance of each family over the samples
+  summarise(mean_relab = sum(relab)) %>%
+  ungroup() %>%
+  # Filter out non-assigned family
+  filter(!is.na(Family))%>%
+  # Select the top 15
+  top_n(16, mean_relab)
+
+
+p_all
+
+p_all_without_unidentified<-p_all[-16,]
+
+```
+
+
+
+#t0
+```{r}
+
+
+#depth
+depth_Family_t0<-asvs_t0[,-4]%>% 
+  filter(count > 0)%>%
+  # Add metadata
+ inner_join(sample_meta_data_t0, by = 'sample')%>%
+  inner_join(taxonomy_t0, by = 'ASV_ID')%>%
+  group_by(Bay, Depth)%>%
+  # Calculate the relative abundance of each family in each site
+  mutate(relab = count/sum(count))%>%
+  ungroup()%>% 
+  left_join(
+    p_all %>% 
+      transmute(Family, top_15_Family = Family),
+    by = 'Family'
+  ) %>%
+  replace_na(list('top_15_Family' = 'Other_Families'))
+
+ra_plot_table_t0<-depth_Family_t0%>%
+  group_by(Bay, Depth,top_15_Family)%>%
+  summarise(relab=sum(relab))
+
+
+ra_plot_table_t0_only_top15<-ra_plot_table_t0[ra_plot_table_t0$top_15_Family != 'Other_Families',  ]
+ra_plot_table_t0_only_top15<-ra_plot_table_t0_only_top15[ra_plot_table_t0_only_top15$top_15_Family !=  'unidentified', ]
+
+
+ra_plot_t0_all<-ggplot(ra_plot_table_t0,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Bay)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_line()) 
+
+ra_plot_t0_all
+
+
+ra_plot_t0_seleted<-ggplot(ra_plot_table_t0_only_top15,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Bay)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+ggtitle("T0")+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        #legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.ticks.x = element_line()) 
+
+ra_plot_t0_seleted
+
+```
+
+#t1
+
+#t1 heated bay
+```{r}
+
+
+#depth
+depth_Family_t1<-asvs_t1[,-4]%>% 
+  filter(count > 0)%>%
+  # Add metadata
+ inner_join(sample_meta_data_t1, by = 'sample')%>%
+  inner_join(taxonomy_t1, by = 'ASV_ID')%>%
+  group_by(Bay, Core, Depth)%>%
+  # Calculate the relative abundance of each family in each site
+  mutate(relab = count/sum(count))%>%
+  ungroup()%>% 
+  left_join(
+    p_all %>% 
+      transmute(Family, top_15_Family = Family),
+    by = 'Family'
+  ) %>%
+  replace_na(list('top_15_Family' = 'Other_Families'))
+
+ra_plot_table_t1_heated<-depth_Family_t1%>%
+  filter(Bay == "heated")%>%
+  group_by(Core, Depth,top_15_Family)%>%
+  summarise(relab=sum(relab))
+
+  
+ra_plot_t1_heated_all<-ggplot(ra_plot_table_t1_heated,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Core)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.ticks.x = element_line(),  
+        axis.text.x = element_blank()) 
+
+ra_plot_t1_heated_all
+
+
+
+ra_plot_table_t1_heated_only_top15<-ra_plot_table_t1_heated[ra_plot_table_t1_heated$top_15_Family != 'Other_Families',  ]
+ra_plot_table_t1_heated_only_top15<-ra_plot_table_t1_heated_only_top15[ra_plot_table_t1_heated_only_top15$top_15_Family !=  'unidentified', ]
+
+
+
+ra_plot_t1_heated_seleted<-ggplot(ra_plot_table_t1_heated_only_top15,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Core)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+ggtitle("T1 heated bay")+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        #legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.ticks.x = element_line()) 
+
+ra_plot_t1_heated_seleted
+
+
+```
+
+#t1 control bay
+```{r}
+
+#depth
+depth_Family_t1<-asvs_t1[,-4]%>% 
+  filter(count > 0)%>%
+  # Add metadata
+ inner_join(sample_meta_data_t1, by = 'sample')%>%
+  inner_join(taxonomy_t1, by = 'ASV_ID')%>%
+  group_by(Bay, Core, Depth)%>%
+  # Calculate the relative abundance of each family in each site
+  mutate(relab = count/sum(count))%>%
+  ungroup()%>% 
+  left_join(
+    p_all%>% 
+      transmute(Family, top_15_Family = Family),
+    by = 'Family'
+  ) %>%
+  replace_na(list('top_15_Family' = 'Other_Families'))
+
+ra_plot_table_t1_control<-depth_Family_t1%>%
+  filter(Bay == "control")%>%
+  group_by(Core, Depth,top_15_Family)%>%
+  summarise(relab=sum(relab))
+
+  
+ra_plot_t1_control_all<-ggplot(ra_plot_table_t1_control,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Core)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.ticks.x = element_line(),  
+        axis.text.x = element_blank()) 
+
+ra_plot_t1_control_all
+
+
+ra_plot_table_t1_control_only_top15<-ra_plot_table_t1_control[ra_plot_table_t1_control$top_15_Family != 'Other_Families',  ]
+ra_plot_table_t1_control_only_top15<-ra_plot_table_t1_control_only_top15[ra_plot_table_t1_control_only_top15$top_15_Family !=  'unidentified', ]
+
+
+ra_plot_t1_control_seleted<-ggplot(ra_plot_table_t1_control_only_top15,aes(x=Depth, y=relab, fill=top_15_Family)) +
+facet_grid(~Core)+
+geom_col() +
+theme_bw() +
+scale_fill_manual(values = col_vector)+
+scale_x_discrete(limits=rev)+
+coord_flip()+
+ggtitle("T1 control bay")+
+labs(x="Sediment depth (cm)", y=element_blank())+
+  theme(legend.position="bottom",
+    legend.key.size = unit(0.5, 'cm'), 
+        legend.key.height = unit(0.5, 'cm'), 
+        legend.key.width = unit(0.7, 'cm'), 
+        #legend.title = element_blank(), 
+        legend.text = element_text(size=10),
+    axis.ticks.x = element_line()) 
+
+ra_plot_t1_control_seleted
+
+```
+
+
+#try mixed barplots
+```{r}
+
+top15_mix<-ggarrange(
+  ra_plot_t0_seleted,
+  ra_plot_t1_control_seleted,
+  ra_plot_t1_heated_seleted, 
+  labels = c("A", "B","C"), 
+  font.label = list(size = 18),
+  nrow  = 3,
+  common.legend = TRUE,
+  legend = "bottom"
+)
+
+ggsave("top15_mix.pdf", plot = top15_mix,width = 40, height =60,units = "cm")
+
+supp_all_mix<-ggarrange(
+  ra_plot_t0_all,
+  ra_plot_t1_control_all,
+  ra_plot_t1_heated_all, 
+  labels = c("A", "B","C"), 
+  font.label = list(size = 18),
+  nrow  = 3,
+  common.legend = TRUE,
+  legend = "bottom"
+)
+
+ggsave("supp_all_mix.pdf", plot = supp_all_mix,width = 40, height =60,units = "cm")
+
+
+
+```
+
+
+
+
+#relative abundance LMMs for the top families
+
+#T0
+```{r}
+
+
+# Prepare phyloseq object
+ps_T0 <- phyloseq(
+  otu_table(otu_mat_T0, taxa_are_rows = TRUE),
+  tax_table(tax_mat_T0),
+  sample_data(samples_df_T0)
+)
+
+# Aggregate to family level
+ps_T0_family <- tax_glom(ps_T0, taxrank = "Family")
+
+# Select top 15 families
+top_15_families <-p_all_without_unidentified$Family 
+
+
+
+  
+otu_count_family_T0 <- as.data.frame(otu_table(ps_T0_family)) %>%
+  mutate(Family = as.vector(tax_table(ps_T0_family)[, "Family"]))
+
+otu_count_family_T0_15 <- otu_count_family_T0 %>%
+  mutate(Family = ifelse(Family %in% top_15_families, Family, "Other")) %>%
+  group_by(Family) %>%
+  summarise(across(where(is.numeric), sum), .groups = "drop")
+
+otu_mat_T0_15 <- otu_count_family_T0_15 %>%
+  column_to_rownames("Family") %>%
+  t() %>%
+  as.matrix()
+
+# Prepare metadata
+sample_meta_T0 <- sample_data(ps_T0_family) %>%
+  data.frame() %>%
+  mutate(
+    Core_ID = factor(Core_ID),
+    Bay = factor(Bay),
+    Core = factor(Core),
+    Depth = as.numeric(as.character(Depth))
+  ) %>%
+  filter(rownames(.) %in% rownames(otu_mat_T0_15))
+
+# Validate matching
+stopifnot(all(rownames(otu_mat_T0_15) == rownames(sample_meta_T0)))
+
+# Define covariates and design
+X_T0 <- sample_meta_T0[, c("Bay", "Depth")] %>%
+  mutate(
+    Bay = factor(Bay, levels = c("control", "heated")),
+    Depth = as.numeric(scale(Depth))  # standardise
+  )
+
+options('contrasts')
+options('contrasts' = c('contr.treatment', 'contr.poly'))
+
+study_design_T0 <- data.frame(Core_ID = sample_meta_T0$Core_ID)
+
+# Define offset
+offset_vec_T0 <- log(rowSums(otu_mat_T0_15))
+
+# Fit gllvm model
+fit_T0_top15 <- gllvm(
+  y = otu_mat_T0_15,
+  X = X_T0,
+  formula = ~ Bay * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T0,
+  studyDesign = study_design_T0,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 0
+)
+fit_T0_top15_1 <- gllvm(
+  y = otu_mat_T0_15,
+  X = X_T0,
+  formula = ~ Bay * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T0,
+  studyDesign = study_design_T0,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 1
+)
+
+
+
+fit_T0_top15_2 <- gllvm(
+  y = otu_mat_T0_15,
+  X = X_T0,
+  formula = ~ Bay * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T0,
+  studyDesign = study_design_T0,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 2
+)
+
+#use AIC to select number of latent variables
+AIC(fit_T0_top15)
+AIC(fit_T0_top15_1)# 1 or 2 are best fit
+AIC(fit_T0_top15_2)
+
+#residual analysis
+par(mfrow = c(1,2))
+plot(fit_T0_top15_1, which = 1:2)
+
+#visualize species correlations
+cr_T0 <- getResidualCor(fit_T0_top15_1)
+library(corrplot); library(gclus)
+corrplot(cr_T0[order.single(cr_T0), order.single(cr_T0)], diag = FALSE, type = "lower", 
+         method = "square", tl.cex = 1, tl.srt = 45, tl.col = "red")
+         
+# Summarise and export
+summary_gllvm_T0 <- summary(fit_T0_top15_1)
+gllvm_results_T0 <- as.data.frame(summary_gllvm_T0$Coef.tableX)
+write.csv(gllvm_results_T0, "gllvm_results_T0_top15.csv", row.names = TRUE)
+
+# Plot latent space
+gllvm::ordiplot(fit_T0_top15_1)
+coefplot(fit_T0_top15_1)
+
+# Plot effects per family
+coefs_T0 <- coef(fit_T0_top15_1)$Xcoef
+ses_T0 <- fit_T0_top15_1$sd$Xcoef
+beta0_T0 <- coef(fit_T0_top15_1)$Intercept
+taxa_names_T0 <- intersect(rownames(coefs_T0), rownames(ses_T0))
+
+bay_levels_T0 <- levels(X_T0$Bay)
+depth_seq_T0 <- seq(min(X_T0$Depth), max(X_T0$Depth), length.out = 100)
+
+newdata_T0 <- expand.grid(Bay = bay_levels_T0, Depth = depth_seq_T0) %>%
+  mutate(
+    Bay = factor(Bay, levels = bay_levels_T0),
+    Depth = as.numeric(Depth)
+  )
+
+Xmat_no_int_T0 <- model.matrix(~ Bay * Depth, data = newdata_T0)[, -1, drop = FALSE]
+
+pred_list_T0 <- lapply(taxa_names_T0, function(fam) {
+  beta <- as.numeric(coefs_T0[fam, ])
+  beta_se <- as.numeric(ses_T0[fam, ])
+  intercept <- beta0_T0[fam]
+  
+  if (any(is.na(beta)) || any(is.na(beta_se))) return(NULL)
+  
+  eta <- intercept + Xmat_no_int_T0 %*% beta
+  se_eta <- sqrt(rowSums(sweep(Xmat_no_int_T0, 2, beta_se, `*`)^2))
+  
+  tibble(
+    Bay = newdata_T0$Bay,
+    Depth = newdata_T0$Depth,
+    Family = fam,
+    predicted = exp(eta),
+    lower = exp(eta - 1.96 * se_eta),
+    upper = exp(eta + 1.96 * se_eta)
+  )
+})
+
+pred_df_T0 <- bind_rows(pred_list_T0)
+
+# Plot
+p_gllvm_T0_15 <- ggplot(pred_df_T0, aes(x = Depth, y = predicted, colour = Bay, fill = Bay)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
+  facet_wrap(~ Family, scales = "free_y") +
+  scale_colour_manual(values = c("control" = "blue", "heated" = "orange")) +
+  scale_fill_manual(values = c("control" = "blue", "heated" = "orange")) +
+  labs(x = "Depth", y = "Predicted abundance", colour = "Bay", fill = "Bay") +
+  theme_minimal(base_size = 12)+
+  theme(
+    strip.text = element_text(size = 7)  # decrease size of title
+  )
+
+p_gllvm_T0_15
+
+ggsave("p_gllvm_T0_top15.jpg", plot = p_gllvm_T0_15, width = 17, height = 12, units = "cm", dpi = 1200)
+
+
+## coefficient plot in ggplot to modify
+library(tidyverse)
+# Reshape coefficients to long format
+coef_T0_long <- as.data.frame(as.table(coefs_T0)) %>%
+  rename(Family = Var1, Variable = Var2, Estimate = Freq) %>%
+  mutate(
+    SE = as.vector(ses_T0)
+  )
+
+
+
+# Calculate 95% CI and significance
+coef_T0_long <- coef_T0_long %>%
+  mutate(
+    lower = Estimate - 1.96 * SE,
+    upper = Estimate + 1.96 * SE,
+    sig = ifelse(lower * upper > 0, "yes", "no")  # significant if CI does not cross 0
+  )
+
+# Clean variable names
+coef_T0_long$Variable <- coef_T0_long$Variable %>%
+  str_replace("Bayheated:Depth", "Bay × Depth") %>%
+  str_replace("Bayheated", "Bay") %>%
+  str_replace("Depth", "Depth")
+# Set Variable as a factor with desired order
+coef_T0_long$Variable <- factor(coef_T0_long$Variable, levels = c("Bay", "Depth", "Bay × Depth"))
+
+# fix the family order
+
+family_levels <- rev(sort(unique(as.character(coef_T0_long$Family))))
+coef_T0_long <- coef_T0_long %>%
+  mutate(Family = factor(Family, levels = family_levels))
+
+
+
+p_coef_T0 <- ggplot(coef_T0_long, aes(x = Estimate, y = Family, colour = sig)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = lower, xmax = upper),
+                 height = 0.2,
+                 position = position_dodge(width = 0.5)) +
+  geom_point(shape = 4, size = 2, position = position_dodge(width = 0.5)) +
+  facet_wrap(~ Variable,  ncol = 3) +
+  scale_colour_manual(values = c("yes" = "black", "no" = "grey70")) +
+  labs(x = "Estimate", y = NULL, colour = "Significance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 9),
+    strip.text = element_text(size = 11),
+   axis.title.x =  element_blank(), 
+    legend.position = "none",
+    panel.spacing = unit(1, "lines")
+  )
+
+p_coef_T0
+
+# Save
+ggsave("p_coef_T0_by_variable.jpg", plot = p_coef_T0, width = 20, height = 16, units = "cm", dpi = 1200)
+
+
+
+
+```
+
+#T1
+```{r gllvm T1} 
+# Make phyloseq object
+ps_T1 <- phyloseq(
+  otu_table(otu_mat_T1, taxa_are_rows = TRUE),
+  tax_table(tax_mat_T1),
+  sample_data(samples_df_T1)
+)
+
+# Aggregate to family level
+ps_T1_family <- tax_glom(ps_T1, taxrank = "Family")
+
+# Select top 15 families
+top_15_families <-p_all_without_unidentified$Family 
+
+otu_count_family_T1 <- as.data.frame(otu_table(ps_T1_family)) %>%
+  mutate(Family = as.vector(tax_table(ps_T1_family)[, "Family"]))
+
+otu_count_family_T1_15 <- otu_count_family_T1 %>%
+  mutate(Family = ifelse(Family %in% top_15_families, Family, "Other")) %>%
+  group_by(Family) %>%
+  summarise(across(where(is.numeric), sum), .groups = "drop")
+
+otu_mat_T1_15 <- otu_count_family_T1_15 %>%
+  column_to_rownames("Family") %>%
+  t() %>%
+  as.matrix()
+
+# Prepare metadata
+sample_meta_T1 <- sample_data(ps_T1_family) %>%
+  data.frame() %>%
+  mutate(
+    Core_ID = factor(Core_ID),
+    Bay = factor(Bay),
+    Core = factor(Core),
+    Depth = as.numeric(as.character(Depth))
+  ) %>%
+  filter(rownames(.) %in% rownames(otu_mat_T1_15))
+
+# Validate matching
+stopifnot(all(rownames(otu_mat_T1_15) == rownames(sample_meta_T1)))
+
+# Define covariates and design
+X_T1 <- sample_meta_T1[, c("Bay", "Core", "Depth")] %>%
+  mutate(
+    Bay = factor(Bay),
+    Core = factor(Core),
+    Depth = as.numeric(scale(Depth))  # standardise
+  )
+
+study_design_T1 <- data.frame(Core_ID = sample_meta_T1$Core_ID)
+
+# Define offset
+offset_vec_T1 <- log(rowSums(otu_mat_T1_15))
+
+# Fit gllvm model
+fit_T1_top15 <- gllvm(
+  y = otu_mat_T1_15,
+  X = X_T1,
+  formula = ~ Bay * Core * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T1,
+  studyDesign = study_design_T1,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 0
+)
+fit_T1_top15_1 <- gllvm(
+  y = otu_mat_T1_15,
+  X = X_T1,
+  formula = ~ Bay * Core * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T1,
+  studyDesign = study_design_T1,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 1
+)
+fit_T1_top15_2 <- gllvm(
+  y = otu_mat_T1_15,
+  X = X_T1,
+  formula = ~ Bay * Core * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T1,
+  studyDesign = study_design_T1,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 2
+)
+
+#use AIC to select number of latent variables
+AIC(fit_T1_top15)
+AIC(fit_T1_top15_1)# 1 or 2 are best fit
+AIC(fit_T1_top15_2)
+
+#residual analysis
+par(mfrow = c(1,2))
+plot(fit_T1_top15_1, which = 1:2)
+
+#visualize species correlations
+cr_T1 <- getResidualCor(fit_T1_top15_1)
+library(corrplot); library(gclus)
+corrplot(cr_T1[order.single(cr_T1), order.single(cr_T1)], diag = FALSE, type = "lower", 
+         method = "square", tl.cex = 1, tl.srt = 45, tl.col = "red")
+         
+# Summarise and export
+summary_gllvm_T1 <- summary(fit_T1_top15_1)
+gllvm_results_T1 <- as.data.frame(summary_gllvm_T1$Coef.tableX)
+write.csv(gllvm_results_T1, "gllvm_results_T1_top15.csv", row.names = TRUE)
+
+# Plot latent space
+gllvm::ordiplot(fit_T1_top15_1)
+
+#coefficient plot!!
+coefplot(fit_T1_top15_1, mfrow=c(2,4))
+
+# Plot effects per family
+coefs_T1 <- coef(fit_T1_top15_1)$Xcoef
+ses_T1 <- fit_T1_top15_1$sd$Xcoef
+beta0_T1 <- coef(fit_T1_top15_1)$Intercept
+taxa_names_T1 <- intersect(rownames(coefs_T1), rownames(ses_T1))
+
+bay_levels_T1 <- levels(X_T1$Bay)
+core_levels_T1<- levels(X_T1$Core)
+depth_seq_T1 <- seq(min(X_T1$Depth), max(X_T1$Depth), length.out = 100)
+
+newdata_T1 <- expand.grid(Bay = bay_levels_T1, Core = core_levels_T1, Depth = depth_seq_T1) %>%
+  mutate(
+    Bay = factor(Bay, levels = bay_levels_T1),
+    Core = factor(Core, levels = core_levels_T1),
+    Depth = as.numeric(Depth)
+  )
+
+Xmat_no_int_T1 <- model.matrix(~ Bay * Core * Depth, data = newdata_T1)[, -1, drop = FALSE]
+
+pred_list_T1 <- lapply(taxa_names_T1, function(fam) {
+  beta <- as.numeric(coefs_T1[fam, ])
+  beta_se <- as.numeric(ses_T1[fam, ])
+  intercept <- beta0_T1[fam]
+  
+  if (any(is.na(beta)) || any(is.na(beta_se))) return(NULL)
+  
+  eta <- intercept + Xmat_no_int_T1 %*% beta
+  se_eta <- sqrt(rowSums(sweep(Xmat_no_int_T1, 2, beta_se, `*`)^2))
+  
+  tibble(
+    Bay = newdata_T1$Bay,
+    Core = newdata_T1$Core,
+    Depth = newdata_T1$Depth,
+    Family = fam,
+    predicted = exp(eta),
+    lower = exp(eta - 1.96 * se_eta),
+    upper = exp(eta + 1.96 * se_eta)
+  )
+})
+
+pred_df_T1 <- bind_rows(pred_list_T1)
+
+# Plot
+library(ggh4x)
+
+p_gllvm_T1_15 <- ggplot(pred_df_T1, aes(x = Depth, y = predicted, colour = Core, fill = Core)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
+  facet_nested(Family ~ Bay, scales = "free_y", space = "free_x") +  
+  scale_colour_manual(values = c("red4", "cyan4")) +
+  scale_fill_manual(values = c("red4", "cyan4")) +
+  labs(x = "Depth", y = "Predicted abundance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+p_gllvm_T1_15
+ggsave("p_gllvm_T1_top15.jpg", plot = p_gllvm_T1_15, width = 15, height = 50, units = "cm", dpi = 1200)
+
+p_gllvm_T1_15_control <- ggplot(pred_df_T1[pred_df_T1$Bay=="control",], aes(x = Depth, y = predicted, colour = Core, fill = Core)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
+  facet_wrap(~ Family, scales = "free_y") +
+  scale_colour_manual(values = c("red4", "cyan4")) +
+  scale_fill_manual(values = c("red4", "cyan4")) +
+  labs(x = "Depth", y = "Predicted abundance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 7)
+)
+
+p_gllvm_T1_15_control
+ggsave("p_gllvm_T1_control_top15.jpg", plot = p_gllvm_T1_15_control, width = 17, height = 12, units = "cm", dpi = 1200)
+
+
+p_gllvm_T1_15_heated <- ggplot(pred_df_T1[pred_df_T1$Bay=="heated",], aes(x = Depth, y = predicted, colour = Core, fill = Core)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
+  facet_wrap(~ Family, scales = "free_y") +
+  scale_colour_manual(values = c("red4", "cyan4")) +
+  scale_fill_manual(values = c("red4", "cyan4")) +
+  labs(x = "Depth", y = "Predicted abundance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 7)
+)
+
+p_gllvm_T1_15_heated
+ggsave("p_gllvm_T1_heated_top15.jpg", plot = p_gllvm_T1_15_heated, width = 17, height = 12, units = "cm", dpi = 1200)
+
+
+
+```
+
+
+```{r gllvm T1 bays separate} 
+# Subset metadata and OTU table by Bay
+sample_meta_T1_control <- sample_meta_T1 %>% filter(Bay == "control")
+sample_meta_T1_heated <- sample_meta_T1 %>% filter(Bay == "heated")
+
+otu_mat_T1_15_control <- otu_mat_T1_15[rownames(sample_meta_T1_control), ]
+otu_mat_T1_15_heated <- otu_mat_T1_15[rownames(sample_meta_T1_heated), ]
+
+# Prepare design matrices for each Bay
+X_T1_control <- sample_meta_T1_control %>%
+  mutate(
+    Core = factor(Core),
+    Depth = as.numeric(scale(Depth)) # standardise within Bay
+  )
+
+X_T1_heated <- sample_meta_T1_heated %>%
+  mutate(
+    Core = factor(Core),
+    Depth = as.numeric(scale(Depth))
+  )
+
+# Study design
+study_design_T1_control <- data.frame(Core_ID = sample_meta_T1_control$Core_ID)
+study_design_T1_heated <- data.frame(Core_ID = sample_meta_T1_heated$Core_ID)
+
+# Define offsets
+offset_vec_T1_control <- log(rowSums(otu_mat_T1_15_control))
+offset_vec_T1_heated <- log(rowSums(otu_mat_T1_15_heated))
+
+# Fit models separately
+fit_T1_control <- gllvm(
+  y = otu_mat_T1_15_control,
+  X = X_T1_control,
+  formula = ~ Core * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T1_control,
+  studyDesign = study_design_T1_control,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 1
+)
+
+fit_T1_heated <- gllvm(
+  y = otu_mat_T1_15_heated,
+  X = X_T1_heated,
+  formula = ~ Core * Depth,
+  family = "negative.binomial",
+  offset = offset_vec_T1_heated,
+  studyDesign = study_design_T1_heated,
+  row.eff = ~(1 | Core_ID),
+  num.lv = 1
+)
+
+# Compare model AICs 
+AIC(fit_T1_control)
+AIC(fit_T1_heated)
+
+# Summarise and export
+summary_control <- summary(fit_T1_control)
+summary_heated <- summary(fit_T1_heated)
+
+write.csv(as.data.frame(summary_control$Coef.tableX), "gllvm_results_T1_control.csv", row.names = TRUE)
+write.csv(as.data.frame(summary_heated$Coef.tableX), "gllvm_results_T1_heated.csv", row.names = TRUE)
+
+# check plots of residuals
+par(mfrow = c(1, 2))
+plot(fit_T1_control, which = 1:2)
+plot(fit_T1_heated, which = 1:2)
+
+# latent space plots
+gllvm::ordiplot(fit_T1_control, main = "Control Bay")
+gllvm::ordiplot(fit_T1_heated, main = "Heated Bay")
+
+#coefficient plots!!
+coefplot(fit_T1_control)
+coefplot(fit_T1_heated)
+
+#prediction plots
+# Define prediction grid for each Bay
+core_levels_control <- levels(X_T1_control$Core)
+core_levels_heated <- levels(X_T1_heated$Core)
+depth_seq_control <- seq(min(X_T1_control$Depth), max(X_T1_control$Depth), length.out = 100)
+depth_seq_heated <- seq(min(X_T1_heated$Depth), max(X_T1_heated$Depth), length.out = 100)
+newdata_control <- expand.grid(Core = core_levels_control, Depth = depth_seq_control)
+newdata_heated <- expand.grid(Core = core_levels_heated, Depth = depth_seq_heated)
+Xmat_control <- model.matrix(~ Core * Depth, data = newdata_control)[, -1, drop = FALSE]
+Xmat_heated <- model.matrix(~ Core * Depth, data = newdata_heated)[, -1, drop = FALSE]
+# Extract coefficients
+coefs_control <- coef(fit_T1_control)$Xcoef
+ses_control <- fit_T1_control$sd$Xcoef
+beta0_control <- coef(fit_T1_control)$Intercept
+coefs_heated <- coef(fit_T1_heated)$Xcoef
+ses_heated <- fit_T1_heated$sd$Xcoef
+beta0_heated <- coef(fit_T1_heated)$Intercept
+taxa_names_control <- intersect(rownames(coefs_control), rownames(ses_control))
+taxa_names_heated <- intersect(rownames(coefs_heated), rownames(ses_heated))
+# Predict function
+predict_gllvm <- function(coefs, ses, intercepts, taxa_names, Xmat, newdata, Bay_label) {
+  lapply(taxa_names, function(fam) {
+    beta <- as.numeric(coefs[fam, ])
+    beta_se <- as.numeric(ses[fam, ])
+    intercept <- intercepts[fam]
+    if (any(is.na(beta)) || any(is.na(beta_se))) return(NULL)
+    eta <- intercept + Xmat %*% beta
+    se_eta <- sqrt(rowSums(sweep(Xmat, 2, beta_se, `*`)^2))
+    tibble(
+      Core = newdata$Core,
+      Depth = newdata$Depth,
+      Family = fam,
+      Bay = Bay_label,
+      predicted = exp(eta),
+      lower = exp(eta - 1.96 * se_eta),
+      upper = exp(eta + 1.96 * se_eta)
+    )
+  }) %>% bind_rows()
+}
+# Predict
+pred_df_control <- predict_gllvm(coefs_control, ses_control, beta0_control, taxa_names_control, Xmat_control, newdata_control, Bay_label = "control")
+pred_df_heated <- predict_gllvm(coefs_heated, ses_heated, beta0_heated, taxa_names_heated, Xmat_heated, newdata_heated, Bay_label = "heated")
+# Combine predictions
+pred_df_T1_separate <- bind_rows(pred_df_control, pred_df_heated)
+
+library(ggh4x)
+
+p_gllvm_T1_separate <- ggplot(pred_df_T1_separate, aes(x = Depth, y = predicted, colour = Core, fill = Core)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, colour = NA) +
+  facet_nested(Family ~ Bay, scales = "free_y", space = "free_x") +  
+  scale_colour_manual(values = c("red4", "cyan4")) +
+  scale_fill_manual(values = c("red4", "cyan4")) +
+  labs(x = "Depth", y = "Predicted abundance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+p_gllvm_T1_separate
+
+ggsave("p_gllvm_T1_separate_top15.jpg", plot = p_gllvm_T1_separate, width = 15, height = 50, units = "cm", dpi = 1200)
+
+
+#Combined Coefficient Plot
+library(tidyverse)
+coef_control_long <- as.data.frame(as.table(coefs_control)) %>%
+  rename(Family = Var1, Variable = Var2, Estimate = Freq) %>%
+  mutate(
+    SE = as.vector(ses_control),
+    Bay = "control"
+  )
+coef_heated_long <- as.data.frame(as.table(coefs_heated)) %>%
+  rename(Family = Var1, Variable = Var2, Estimate = Freq) %>%
+  mutate(
+    SE = as.vector(ses_heated),
+    Bay = "heated"
+  )
+# Combine
+coef_long <- bind_rows(coef_control_long, coef_heated_long)
+# Keep only predictors of interest
+coef_long <- coef_long %>%
+  filter(str_detect(Variable, "Core|Depth"))
+# Calculate 95% CIs and significance
+coef_long <- coef_long %>%
+  mutate(
+    lower = Estimate - 1.96 * SE,
+    upper = Estimate + 1.96 * SE,
+    sig = ifelse(lower * upper > 0, "yes", "no")  # significant if CI does not cross 0
+  )
+# Clean variable names
+coef_long$Variable <- coef_long$Variable %>%
+  str_replace("CoreTranslocated:Depth", "Treatment × Depth") %>%
+  str_replace("CoreTranslocated", "Treatment") %>%
+  str_replace("Depth", "Depth")
+# Set Variable as a factor with desired order
+coef_T0_long$Variable <- factor(coef_T0_long$Variable, levels = c("Treatment", "Depth", "Treatment × Depth"))
+
+# Sort Families by effect size **within each Bay and Variable**
+coef_long <- coef_long %>%
+  group_by(Bay, Variable) %>%
+  mutate(Family = fct_reorder(Family, Estimate)) %>%
+  ungroup()
+
+
+coef_long$Variable<-factor(coef_long$Variable, levels = c("Treatment","Depth", "Treatment × Depth") )
+
+coef_long <- coef_long %>%
+  mutate(Family = factor(Family, levels = family_levels))
+
+
+p_coef_final <- ggplot(coef_long, aes(x = Estimate, y = Family, colour = sig)) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_errorbarh(aes(xmin = lower, xmax = upper),
+                 height = 0.2,
+                 position = position_dodge(width = 0.5)) +
+  geom_point(shape = 4, size = 2, position = position_dodge(width = 0.5)) +  # Cross
+  facet_grid(Bay ~ Variable, space = "free") +
+  scale_colour_manual(values = c("yes" = "black", "no" = "grey70")) +
+  labs(x = "Estimate", y = NULL, colour = "Significance") +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.y = element_text(size = 9),
+    strip.text = element_text(size = 11),
+    legend.position = "none",
+    panel.spacing = unit(1, "lines")
+  )
+
+p_coef_final
+
+ggsave("p_coef_final_by_bay_variable_T1.jpg", plot = p_coef_final, width = 22, height = 16, units = "cm", dpi = 1200)
+
+```
+
+
+#try mix coef t0 t1 into one plot
+```{r}
+
+p_coef_mix<-ggarrange(
+  p_coef_T0,
+  p_coef_final,
+  labels = c("A", "B"), 
+  font.label = list(size = 18),
+  nrow  = 2,
+  heights  = c(1, 2)
+)
+
+p_coef_mix
+
+
+ggsave("p_coef_mix.pdf", plot = p_coef_mix, width = 20, height = 25, units = "cm", dpi = 1200)
+
+```
+
+
