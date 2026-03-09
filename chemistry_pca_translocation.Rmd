@@ -1,0 +1,648 @@
+---
+title: "PCA for all tube chemical"
+author: "Songjun, edited by Romana"
+date: "2026-03-05"
+output: html_document
+---
+
+
+load package
+```{r library package}
+library(readxl)
+library(ggplot2)
+library(grid)
+library(patchwork)
+library(gridExtra)
+library(corrplot)
+library(lme4)
+library(lmerTest)
+library(tidyverse)
+library(ggeffects)
+library(ggpubr)
+library(car)
+library(effectsize)
+library(DHARMa)
+
+```
+
+
+#sepearted into T0 dataset and T1 dataset
+
+```{r data}
+
+tube_total<-read_xlsx("combined_chemical_tubes_all.xlsx")
+
+tube_total <- tube_total %>%
+  mutate(Core_ID = paste(Site, Core, sep = "_"))
+
+tube_total$Bay[tube_total$Bay=="Warm"]<-"Heated"
+tube_total$Depth[tube_total$Depth=="0-1"]<-0
+tube_total$Depth[tube_total$Depth=="0-2"]<-0
+tube_total$Depth[tube_total$Depth=="1-2"]<-1
+tube_total$Depth[tube_total$Depth=="8-9"]<-8
+tube_total$Depth[tube_total$Depth=="15-16"]<-15
+tube_total$Depth[tube_total$Depth=="22-23"]<-22
+tube_total$Depth[tube_total$Depth=="29-30"]<-29
+tube_total<-tube_total[tube_total$Depth != "BW",]
+tube_total$Depth<-as.numeric(tube_total$Depth)
+
+site_list<-c("K","J","L","I","M","N1","N2","N3","E","A","F","H2","C2","C","A2","B")
+
+tube_T0_to_15<-tube_total[tube_total$Time=="T0",]
+tube_T0_to_15<-tube_T0_to_15[tube_T0_to_15$Depth<21,]
+
+tube_T1_to_15<-tube_total[tube_total$Time=="T1",]
+tube_T1_to_15<-tube_T1_to_15[tube_T1_to_15$Depth<21,]
+
+
+tube_T1_heated_to_15<-tube_T1_to_15[tube_T1_to_15$Bay=="Heated",]
+tube_T1_control_to_15<-tube_T1_to_15[tube_T1_to_15$Bay=="Control",]
+
+```
+
+
+#correlation matrix test (to check if some variables are correlated)
+#maybe not very related to our case here, but interesting
+```{r}
+
+tube_total_geochemical<-tube_total[,c(6,8,9,11,12,14,16)]
+
+
+str(tube_total_geochemical)
+tube_total_geochemical<-as.data.frame(tube_total_geochemical)
+test<-na.omit(tube_total_geochemical)
+
+cor(test)
+
+
+```
+
+#calculate mean to replace NA values
+#T0
+```{r}
+
+#later prcomp can't accept NA values, so replace each NA value with mean
+#so4
+so4_mean<-mean(na.omit(tube_T0_to_15$`SO4 (mg/L)`))
+tube_T0_to_15$`SO4 (mg/L)`<-replace_na(tube_T0_to_15$`SO4 (mg/L)`, so4_mean )
+#no3-n
+no3_n_mean<-mean(na.omit(tube_T0_to_15$`NO3(-N)`))
+tube_T0_to_15$`NO3(-N)`<-replace_na(tube_T0_to_15$`NO3(-N)`,  no3_n_mean)
+#no3
+no3_mean<-mean(na.omit(tube_T0_to_15$`NO3 (mg/L)`))
+tube_T0_to_15$`NO3 (mg/L)`<-replace_na(tube_T0_to_15$`NO3 (mg/L)`,no3_mean)
+#Total FE
+total_fe_mean<-mean(na.omit(tube_T0_to_15$`Total Fe (μM)`))
+tube_T0_to_15$`Total Fe (μM)`<-replace_na(tube_T0_to_15$`Total Fe (μM)`, total_fe_mean)
+#FE 2
+fe2_mean<-mean(na.omit(tube_T0_to_15$`Fe2 (μM)`))
+tube_T0_to_15$`Fe2 (μM)`<-replace_na(tube_T0_to_15$`Fe2 (μM)`,  fe2_mean)
+#po4
+po4mean<-mean(na.omit(tube_T0_to_15$`PO4 3- (μM)`))
+tube_T0_to_15$`PO4 3- (μM)`<-replace_na(tube_T0_to_15$`PO4 3- (μM)`, po4mean)
+#OM
+OM_mean<-mean(na.omit(tube_T0_to_15$`organic _percentage`))
+tube_T0_to_15$`organic _percentage`<-replace_na(tube_T0_to_15$`organic _percentage`,  OM_mean)
+
+
+```
+
+
+
+#start making PCA
+#table prepartion and calculating PC for T0
+```{r}
+
+
+#not taking NO3-N for now as it seems a repeat to NO3 and those two are highly related
+
+tube_T0_to_15_geochemical<-tube_T0_to_15[,c(6,9,11,12,14,16)]
+
+
+PCA_OKG_T0_to_15<-prcomp(tube_T0_to_15_geochemical, scale. = TRUE, center = TRUE)
+PCtable_OKG_T0_to_15<-PCA_OKG_T0_to_15$x
+tube_T0_to_15_with_PC_1_2<-cbind(tube_T0_to_15,PCtable_OKG_T0_to_15[,1:2])
+
+coefficient_OKG_T0_to_15<-PCA_OKG_T0_to_15$rotation
+coefficient_OKG_T0_to_15
+#always consider this explanation table with the PCA results, as it links to the specified how each chemical parameters contribute to each PC axis
+
+coefficient_OKG_T0_to_15<-as.data.frame(coefficient_OKG_T0_to_15)
+write.csv(coefficient_OKG_T0_to_15,file = "coefficient_to_15_T0.csv",row.names = TRUE)
+
+
+#get the proportion of variance
+summary(PCA_OKG_T0_to_15)
+
+#PC1 48.96%, PC2 20.88%
+
+
+
+
+```
+
+
+
+#linear mixed model for T0
+```{r}
+
+#pc1
+
+tube_T0_to_15_with_PC_1_2$Depth<-as.numeric(tube_T0_to_15_with_PC_1_2$Depth)
+tube_T0_to_15_model_PC1<-lmer(PC1~Bay*Depth+(1|Core_ID), data = tube_T0_to_15_with_PC_1_2)
+
+summary(tube_T0_to_15_model_PC1)
+anova(tube_T0_to_15_model_PC1) 
+rand(tube_T0_to_15_model_PC1)# check significance of random
+eta_squared(tube_T0_to_15_model_PC1) # compute partial eta2 values
+
+plot(tube_T0_to_15_model_PC1)
+hist(resid(tube_T0_to_15_model_PC1))
+simulateResiduals(fittedModel = tube_T0_to_15_model_PC1, plot=TRUE)# not perfect but ok
+
+
+# interaction not significant simplify model - exclude interaction
+tube_T0_to_15_model_PC1b<-lmer(PC1~Bay+Depth + (1|Core_ID), data = tube_T0_to_15_with_PC_1_2)
+
+summary(tube_T0_to_15_model_PC1b)
+anova(tube_T0_to_15_model_PC1b)
+rand(tube_T0_to_15_model_PC1b)
+eta_squared(tube_T0_to_15_model_PC1b) # compute partial eta2 values
+
+
+#pc2
+tube_T0_to_15_model_PC2<-lmer(PC2~Bay*Depth+ (1 | Core_ID), data = tube_T0_to_15_with_PC_1_2)
+summary(tube_T0_to_15_model_PC2)
+anova(tube_T0_to_15_model_PC2, type="II")
+rand(tube_T0_to_15_model_PC2)
+eta_squared(tube_T0_to_15_model_PC2)
+
+plot(tube_T0_to_15_model_PC2)
+hist(resid(tube_T0_to_15_model_PC2))
+simulateResiduals(fittedModel = tube_T0_to_15_model_PC2, plot=TRUE)#looks good
+
+
+#simplified to exclude interaction
+tube_T0_to_15_model_PC2b<-lmer(PC2~Bay+Depth+ (1 | Core_ID), data = tube_T0_to_15_with_PC_1_2)
+summary(tube_T0_to_15_model_PC2b)
+anova(tube_T0_to_15_model_PC2b)
+rand(tube_T0_to_15_model_PC2b)
+eta_squared(tube_T0_to_15_model_PC2b)
+
+```
+
+
+#visulaize T0 results
+#pc predicted values
+```{r}
+
+# Shared theme to reuse across all plots
+theme_consistent <- theme_bw() +
+  theme(
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 12),
+    plot.title = element_text(size = 16),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 13),
+    strip.text = element_text(size = 16),
+    panel.border = element_rect(linewidth = 1.25),
+    strip.background = element_rect(fill = "white", linewidth = 1.25)
+  )
+
+pred_tube_T0_to_15_model_PC1b <- ggeffect(tube_T0_to_15_model_PC1b, terms = c("Depth", "Bay"))
+pred_tube_T0_to_15_model_PC1b
+
+
+
+
+tube_T0_to_15_pc1_rawdotplot<-ggplot(pred_tube_T0_to_15_model_PC1b, aes(x = x, y = predicted, color = group, fill = group))+
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T0_to_15_with_PC_1_2,
+             mapping = aes(x = Depth, y = PC1, color = Bay),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#2166AC","#D6191B"))+  
+  scale_fill_manual(values = c("#2166AC", "#D6191B")) +  
+  labs(x = "Depth (cm)",
+    y = "PC1")+
+  theme_consistent+
+  theme(legend.position = "none")
+
+tube_T0_to_15_pc1_rawdotplot
+
+
+pred_tube_T0_to_15_model_PC2b <- ggeffect(tube_T0_to_15_model_PC2b, terms = c("Depth", "Bay"))
+pred_tube_T0_to_15_model_PC2b
+
+
+tube_T0_to_15_pc2_rawdotplot<-ggplot(pred_tube_T0_to_15_model_PC2b, aes(x = x, y = predicted, color = group, fill = group))+
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T0_to_15_with_PC_1_2,
+             mapping = aes(x = Depth, y = PC2, color = Bay),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#2166AC","#D6191B"))+  
+  scale_fill_manual(values = c("#2166AC", "#D6191B")) +  
+  labs(x = "Depth (cm)",
+    y = "PC2")+
+  theme_consistent+
+  theme(legend.position = "none")
+
+tube_T0_to_15_pc2_rawdotplot
+
+
+
+
+
+
+
+```
+
+#pca dot plot
+```{r}
+
+# Ensure tube_T1_to_15_with_PC_1_2 is a data frame
+tube_T0_to_15_with_PC_1_2 <- as.data.frame(tube_T0_to_15_with_PC_1_2)
+
+# Check if 'Bay' column exists (replace 'Bay' with actual column name if different)
+if (!"Bay" %in% colnames(tube_T0_to_15_with_PC_1_2)) {
+  stop("Column 'Bay' not found! Replace it with the correct column name.")
+}
+
+# Create a data frame for the PCA scores
+pca_data <- tube_T0_to_15_with_PC_1_2
+
+# Extract PCA loadings (rotation) for geochemical variables
+pca_arrows <- as.data.frame(PCA_OKG_T0_to_15$rotation[, 1:2])
+pca_arrows$Variable <- rownames(pca_arrows)  # Add variable names
+
+# Scale arrows for visualization
+scale_factor <- 7  # Adjust as needed for arrow length
+pca_arrows <- pca_arrows %>%
+  mutate(PC1 = PC1 * scale_factor,
+         PC2 = PC2 * scale_factor)
+
+
+# PCA plot with color by 'Bay' and arrows for geochemical variablesand depths added
+pca_biplot_plot_with_depth<-ggplot(pca_data, aes(x = PC1, y = PC2, color = Bay)) +
+  geom_point(size = 8, alpha = 0.8) +  # Plot PCA scores with color by Bay
+  geom_text(data = pca_data, aes(x = PC1, y = PC2, label = Depth),
+                 color = "white", size = 5) + # alternatively could show depth as a colour gradient
+  geom_segment(data = pca_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "black") +  # Arrows for variables
+  geom_label_repel(data = pca_arrows, aes(x = PC1, y = PC2, label = Variable),
+                 color = "black", size = 4, fill = "white", box.padding = 0.5, segment.color = NA) +
+  xlab("PC 1 (48.96 %)") +
+  ylab("PC 2 (20.88 %)") +
+  #ggtitle("PCA Biplot of T0") +
+  xlim(-5,9)+
+  ylim(-3.5,6)+
+    scale_colour_manual(values = c("#2166AC","#D6191B"))+
+  theme_consistent+
+  theme(legend.position = "none")
+
+pca_biplot_plot_with_depth
+
+# add depths to figure
+
+```
+
+#select T0 figure mix
+```{r}
+
+mix1 <- ggarrange(
+  tube_T0_to_15_pc1_rawdotplot,  
+  tube_T0_to_15_pc2_rawdotplot,  
+  labels = c("b", "c"), 
+  font.label = list(size = 18),
+  common.legend = TRUE, 
+  legend = "none", 
+  nrow = 2
+)
+
+mix1
+
+# Combine the plots into the custom layout using layout_matrix
+pca_mix_tube_T0_to_15 <- ggarrange(
+  pca_biplot_plot_with_depth,  
+  mix1,
+  labels = c("a", "b", "c"), 
+  font.label = list(size = 18),
+  ncol = 2,
+  widths = c(1.5, 1)) 
+
+pca_mix_tube_T0_to_15
+
+
+ggsave("PCA_T0_mix_plot_to_15.pdf", plot = pca_mix_tube_T0_to_15,width = 25, height = 15,units = "cm")
+
+```
+
+
+
+
+#T1 combined
+#calculate mean to replace NA values
+#T1
+```{r}
+
+#later prcomp can't accept NA values, so replace each NA value with mean
+#so4
+so4_mean<-mean(na.omit(tube_T1_to_15$`SO4 (mg/L)`))
+tube_T1_to_15$`SO4 (mg/L)`<-replace_na(tube_T1_to_15$`SO4 (mg/L)`, so4_mean )
+#no3-n
+no3_n_mean<-mean(na.omit(tube_T1_to_15$`NO3(-N)`))
+tube_T1_to_15$`NO3(-N)`<-replace_na(tube_T1_to_15$`NO3(-N)`,  no3_n_mean)
+#no3
+no3_mean<-mean(na.omit(tube_T1_to_15$`NO3 (mg/L)`))
+tube_T1_to_15$`NO3 (mg/L)`<-replace_na(tube_T1_to_15$`NO3 (mg/L)`,no3_mean)
+#Total FE
+total_fe_mean<-mean(na.omit(tube_T1_to_15$`Total Fe (μM)`))
+tube_T1_to_15$`Total Fe (μM)`<-replace_na(tube_T1_to_15$`Total Fe (μM)`, total_fe_mean)
+#FE 2
+fe2_mean<-mean(na.omit(tube_T1_to_15$`Fe2 (μM)`))
+tube_T1_to_15$`Fe2 (μM)`<-replace_na(tube_T1_to_15$`Fe2 (μM)`,  fe2_mean)
+#po4
+po4mean<-mean(na.omit(tube_T1_to_15$`PO4 3- (μM)`))
+tube_T1_to_15$`PO4 3- (μM)`<-replace_na(tube_T1_to_15$`PO4 3- (μM)`, po4mean)
+#OM
+OM_mean<-mean(na.omit(tube_T1_to_15$`organic _percentage`))
+tube_T1_to_15$`organic _percentage`<-replace_na(tube_T1_to_15$`organic _percentage`,  OM_mean)
+
+
+```
+
+
+
+#start making PCA
+#table prepartion and calculating PC for T1
+```{r}
+
+
+tube_T1_to_15_geochemical<-tube_T1_to_15[,c(6,9,11,12,14,16)]
+
+
+PCA_OKG_T1_to_15<-prcomp(tube_T1_to_15_geochemical, scale. = TRUE, center = TRUE)
+PCtable_OKG_T1_to_15<-PCA_OKG_T1_to_15$x
+tube_T1_to_15_with_PC_1_2<-cbind(tube_T1_to_15,PCtable_OKG_T1_to_15[,1:2])
+
+coefficient_OKG_T1_to_15<-PCA_OKG_T1_to_15$rotation
+coefficient_OKG_T1_to_15
+#always consider this explanation table with the PCA results, as it links to the specified how each chemical parameters contribute to each PC axis
+
+coefficient_OKG_T1_to_15<-as.data.frame(coefficient_OKG_T1_to_15)
+write.csv(coefficient_OKG_T1_to_15,file = "coefficient_to_15_T1.csv",row.names = TRUE)
+
+
+#get the proportion of variance
+summary(PCA_OKG_T1_to_15)
+
+#PC1 50.64%, PC2 16.96%
+
+
+```
+
+
+
+#linear mixed model for T1
+```{r}
+
+#pc1
+tube_T1_to_15_with_PC_1_2$Depth<-as.numeric(as.character(tube_T1_to_15_with_PC_1_2$Depth))
+tube_T1_to_15_model_PC1<-lmer(PC1~Bay*Depth*Core+(1|Core_ID), data = tube_T1_to_15_with_PC_1_2)
+summary(tube_T1_to_15_model_PC1)
+anova(tube_T1_to_15_model_PC1)
+rand(tube_T1_to_15_model_PC1)
+eta_squared(tube_T1_to_15_model_PC1)
+
+plot(tube_T1_to_15_model_PC1)
+hist(resid(tube_T1_to_15_model_PC1))
+simulateResiduals(fittedModel = tube_T1_to_15_model_PC1, plot=TRUE) # not perfect but ok
+
+#results for T1 mixed model
+# for the mixed model with sites as random effect, the three way interaction  (bay, depth, core) is significant
+
+#pc2
+tube_T1_to_15_model_PC2<-lmer(PC2~Bay*Depth*Core+(1|Core_ID), data = tube_T1_to_15_with_PC_1_2)
+summary(tube_T1_to_15_model_PC2)
+anova(tube_T1_to_15_model_PC2) # only depth significant
+rand(tube_T1_to_15_model_PC2)
+eta_squared(tube_T1_to_15_model_PC2)
+
+plot(tube_T1_to_15_model_PC2)
+hist(resid(tube_T1_to_15_model_PC2))
+simulateResiduals(fittedModel = tube_T1_to_15_model_PC2, plot=TRUE)
+
+#pc2 without interaction
+tube_T1_to_15_model_PC2b<-lmer(PC2~Bay+Depth+Core
+                               +Bay*Depth
+                               + Bay*Core 
+                               +Core*Depth
+                               +(1|Core_ID), data = tube_T1_to_15_with_PC_1_2)
+
+anova(tube_T1_to_15_model_PC2b)
+
+tube_T1_to_15_model_PC2c<-lmer(PC2~Bay+Depth+Core
+                               +(1|Core_ID), data = tube_T1_to_15_with_PC_1_2)
+
+anova(tube_T1_to_15_model_PC2c)
+
+```
+
+#linear mixed model for T1 two bays seperated
+```{r}
+
+
+#pc1
+
+#heated
+tube_T1_to_15_model_PC1_heated<-lmer(PC1~Depth*Core+(1|Core_ID), data = tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Heated",])
+
+summary(tube_T1_to_15_model_PC1_heated)
+anova(tube_T1_to_15_model_PC1_heated)
+rand(tube_T1_to_15_model_PC1_heated)
+
+#control
+tube_T1_to_15_model_PC1_control<-lmer(PC1~Depth*Core+(1|Core_ID), data = tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Control",])
+
+summary(tube_T1_to_15_model_PC1_control)
+anova(tube_T1_to_15_model_PC1_control)
+
+rand(tube_T1_to_15_model_PC1_control)
+
+
+```
+
+
+
+#visulaize T1 results
+
+#heated bay
+#pc predicted values
+```{r}
+
+
+tube_T1_to_15_with_PC_1_2
+
+tube_T1_to_15_pc1_prediction <- predict_response(tube_T1_to_15_model_PC1, terms = c("Depth", "Core", "Bay"))
+
+
+tube_T1_heated_to_15_pc1_rawdotplot<-ggplot(tube_T1_to_15_pc1_prediction[tube_T1_to_15_pc1_prediction$facet=="Heated",], aes(x = x, y = predicted, color = group, fill = group)) +
+    geom_line(aes(linetype = group), linewidth = 1) + 
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Heated",],
+             mapping = aes(x = Depth, y = PC1, color = Core),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#D6191B","#00ACC1"))+  
+  scale_fill_manual(values = c("#D6191B","#00ACC1")) +  
+      scale_linetype_manual(values = c("solid", "dashed"),
+                        guide = "none") + 
+  ylim(-3,6)+
+  labs(x = "Depth (cm)",
+    y = "PC1")+
+  ggtitle("Heated bay")+
+  theme_consistent
+
+tube_T1_heated_to_15_pc1_rawdotplot
+
+
+tube_T1_control_to_15_pc1_rawdotplot<-ggplot(tube_T1_to_15_pc1_prediction[tube_T1_to_15_pc1_prediction$facet=="Control",], aes(x = x, y = predicted, color = group, fill = group)) +
+    geom_line(aes(linetype = group), linewidth = 1) +  
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Control",],
+             mapping = aes(x = Depth, y = PC1, color = Core),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#2166AC","#F57C00"))+  
+  scale_fill_manual(values = c("#2166AC","#F57C00")) +  
+    scale_linetype_manual(values = c("solid", "dashed"),
+                        guide = "none") + 
+  ylim(-3,6)+
+  labs(x = "Depth (cm)",
+    y = "PC1")+
+  ggtitle("Control bay")+
+  theme_consistent
+
+tube_T1_control_to_15_pc1_rawdotplot
+
+
+
+```
+
+#pca dot plot heated bay
+```{r}
+
+# Ensure tube_T1_to_15_with_PC_1_2 is a data frame
+tube_T1_to_15_with_PC_1_2 <- as.data.frame(tube_T1_to_15_with_PC_1_2)
+
+# Check if 'Bay' column exists (replace 'Bay' with actual column name if different)
+if (!"Bay" %in% colnames(tube_T0_to_15_with_PC_1_2)) {
+  stop("Column 'Bay' not found! Replace it with the correct column name.")
+}
+
+
+# Extract PCA loadings (rotation) for geochemical variables
+pca_arrows<- as.data.frame(PCA_OKG_T1_to_15$rotation[, 1:2])
+pca_arrows$Variable <- rownames(pca_arrows)  # Add variable names
+
+# Scale arrows for visualization
+scale_factor <- 5.5  # Adjust as needed for arrow length
+pca_arrows<- pca_arrows%>%
+  mutate(PC1 = PC1 * scale_factor,
+         PC2 = PC2 * scale_factor)
+
+
+# Create a data frame for the PCA scores heated bay
+pca_data_heated <- tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Heated",]
+
+
+# heated bay pca biplot 
+pca_biplot_plot_with_depth_heated<-ggplot(pca_data_heated, aes(x = PC1, y = PC2, color = Core)) +
+  geom_point(size = 8, alpha = 0.8) +  # Plot PCA scores with color by Bay
+  geom_text(data = pca_data_heated, aes(x = PC1, y = PC2, label = Depth),
+                 color = "white", size = 5) + # alternatively could show depth as a colour gradient
+  geom_segment(data = pca_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "black") +  # Arrows for variables
+  geom_label_repel(data = pca_arrows, aes(x = PC1, y = PC2, label = Variable),
+                 color = "black", size = 4, fill = "white", box.padding = 0.5, segment.color = NA) +
+  xlab("PC 1 (50.64 %)") +
+  ylab("PC 2 (16.96 %)") +
+  ggtitle("Heated bay") +
+  xlim(-3,6.5)+
+  ylim(-6.5,3)+
+    scale_colour_manual(values = c("#D6191B","#00ACC1"))+
+  theme_consistent +
+  theme(legend.position = "none")
+pca_biplot_plot_with_depth_heated
+
+
+# Create a data frame for the PCA scores control bay
+pca_data_control <- tube_T1_to_15_with_PC_1_2[tube_T1_to_15_with_PC_1_2$Bay=="Control",]
+
+
+# or with labels instead and depths added? 
+pca_biplot_plot_with_depth_control<-ggplot(pca_data_control, aes(x = PC1, y = PC2, color = Core)) +
+  geom_point(size = 8, alpha = 0.8) +  # Plot PCA scores with color by Bay
+  geom_text(data = pca_data_control, aes(x = PC1, y = PC2, label = Depth),
+                 color = "white", size = 5) + # alternatively could show depth as a colour gradient
+  geom_segment(data = pca_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "black") +  # Arrows for variables
+  geom_label_repel(data = pca_arrows, aes(x = PC1, y = PC2, label = Variable),
+                 color = "black", size = 4, fill = "white", box.padding = 0.5, segment.color = NA) +
+  xlab("PC 1 (50.64 %)") +
+  ylab("PC 2 (16.96 %)") +
+  ggtitle("Control bay") +
+   xlim(-3,6.5)+
+  ylim(-6.5,3)+
+    scale_colour_manual(values = c("#2166AC","#F57C00"))+
+  theme_consistent +
+  theme(legend.position = "none")
+
+  
+pca_biplot_plot_with_depth_control
+
+
+```
+
+#select T1 figure mix
+```{r}
+
+
+# Combine the plots into the custom layout using layout_matrix
+pca_mix_tube_T1_to_15 <- ggarrange(
+  pca_biplot_plot_with_depth_heated,  
+  tube_T1_heated_to_15_pc1_rawdotplot,
+  pca_biplot_plot_with_depth_control,
+  tube_T1_control_to_15_pc1_rawdotplot,
+  labels = c("a", "b", "c","d"), 
+  font.label = list(size = 18),
+  align = "hv",
+  common.legend = TRUE, legend = "right",
+                    ncol=2, nrow=2)
+
+pca_mix_tube_T1_to_15
+
+
+ggsave("PCA_T1_mix_plot_to_15.pdf", plot = pca_mix_tube_T1_to_15, width = 30, height = 30,units = "cm")
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

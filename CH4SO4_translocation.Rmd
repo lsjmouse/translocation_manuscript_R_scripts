@@ -1,0 +1,576 @@
+---
+author: "Songjun, edited by Romana"
+date: "2026-03-05"
+output: html_document
+---
+
+#load package
+```{r load backage} 
+
+library(tidyverse)
+library(gridExtra)
+library(ggplot2)
+library(reshape2)
+library(ggrepel)
+library(vegan)
+library(viridis)
+library(cowplot)
+library(phyloseq)
+library(SRS)
+library(ANCOMBC)
+library(ggpubr)
+library(zCompositions)
+library(readxl)
+library(ggpubr)
+library(emmeans)
+library(DHARMa)
+library(lme4)
+library(ggeffects)
+library(rstatix)
+
+
+#many different colours
+library(RColorBrewer)
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+```
+
+
+#load data
+```{r}
+
+CH4_all_translocation<-read_excel("CH4_translocation.xlsx")
+
+CH4_all_translocation$Bay[CH4_all_translocation$Bay=="warm"]<-"heated"
+CH4_all_translocation$Core[CH4_all_translocation$Core=="ori"]<-"Resident"
+CH4_all_translocation$Core[CH4_all_translocation$Core=="trans"]<-"Translocated"
+
+
+
+CH4_all_translocation <- CH4_all_translocation %>%
+  mutate(Core_ID = paste(Site, Core, sep = "_"))
+
+#add log10 ch4 value
+CH4_all_translocation <- CH4_all_translocation %>%
+  mutate(log10_CH4_mM = log10(`CH4(mM)`))
+
+CH4_all_translocation_T0<-CH4_all_translocation[CH4_all_translocation$Time=="T0",]
+CH4_all_translocation_T1<-CH4_all_translocation[CH4_all_translocation$Time=="T1",]
+
+
+```
+
+
+#check results distribution
+```{r}
+
+hist(log10(CH4_all_translocation_T0$`CH4(mM)`))
+
+hist(log10(CH4_all_translocation_T1$`CH4(mM)`))
+
+hist(CH4_all_translocation$`CH4(mM)`)
+
+
+hist(SO4_all_translocation$`sulfate (mM)`)
+hist(log10(SO4_all_translocation$`sulfate (mM)`))
+
+#so try have the same model for alpha diversty, but the values using log10, to check how the results looks
+
+```
+
+
+#CH4 model t0
+```{r}
+
+str(CH4_all_translocation_T0)
+CH4_all_translocation_T0$Bay<-as.factor(CH4_all_translocation_T0$Bay)
+
+
+
+T0_CH4<-lmer(log10_CH4_mM~Bay*Depth+(1|Core_ID), data = CH4_all_translocation_T0)
+anova(T0_CH4) # depth and depth*bay interaction sign
+rand(T0_CH4) #random effect sign
+
+eta_squared(T0_CH4)
+
+
+simulateResiduals(fittedModel = T0_CH4, plot=TRUE)
+
+
+```
+
+
+#T0 figure
+```{r}
+
+T0_CH4_pred <- ggeffect(T0_CH4, terms = c("Depth", "Bay"))
+
+
+T0_CH4_predictionplot <- ggplot(T0_CH4_pred, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = CH4_all_translocation_T0,
+             mapping = aes(x = Depth, y = log10_CH4_mM, color = Bay),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#2166AC", "#D6191B"),name="Bay") +
+  scale_fill_manual(values = c("#2166AC", "#D6191B"),name="Bay") +
+  labs(x = "Depth (cm)", y = "log10 CH4") +
+  coord_flip()+
+  scale_x_reverse()+
+  theme_bw() +
+  theme(text = element_text(size = 20)) +
+  theme(panel.grid = element_blank())
+
+T0_CH4_predictionplot
+
+
+```
+
+
+#CH4 model t1
+```{r}
+
+str(CH4_all_translocation_T1)
+CH4_all_translocation_T1$Bay<-as.factor(CH4_all_translocation_T1$Bay)
+CH4_all_translocation_T1$Core<-as.factor(CH4_all_translocation_T1$Core)
+
+T1_CH4<-lmer(log10_CH4_mM~Bay*Depth*Core+(1|Core_ID), data = CH4_all_translocation_T1)
+
+T1_CH4b<-lmer(log10_CH4_mM~Bay+Depth+Core+Depth:Core+ +(1|Core_ID), data = CH4_all_translocation_T1)
+T1_CH4b<-lmer(log10_CH4_mM~Bay*Depth+Bay*Core+Depth*Core+ +(1|Core_ID), data = CH4_all_translocation_T1)
+
+summary(T1_CH4)
+anova(T1_CH4)#only depth sign2
+rand(T1_CH4)
+eta_squared(T1_CH4)
+
+summary(T1_CH4b)
+anova(T1_CH4b)#again only depth sign2
+rand(T1_CH4b)
+eta_squared(T1_CH4b)
+
+
+
+```
+
+
+#T1 visulization
+```{r}
+
+#raw dot plot with depths
+bay_exp_colors <- c(
+  "heated_Resident"      = "#D6191B", 
+  "control_Resident"     = "#2166AC", 
+  "heated_Translocated"  = "#00ACC1", 
+  "control_Translocated" = "#F57C00"  
+)
+
+T1_CH4_prediction <- predict_response(T1_CH4, terms = c("Depth", "Core", "Bay"))
+names(T1_CH4_prediction)[names(T1_CH4_prediction) == "facet"] <- "Bay"
+
+# Add color_group to prediction object (group = Core, Bay = facet column)
+T1_CH4_prediction$color_group <- paste(T1_CH4_prediction$Bay, 
+                                          T1_CH4_prediction$group, sep = "_")
+CH4_all_translocation_T1$color_group <- paste(CH4_all_translocation_T1$Bay, 
+                                          CH4_all_translocation_T1$Core, sep = "_")
+
+T1_CH4_predictionplot <- ggplot(T1_CH4_prediction, aes(x = x, y = predicted, color = color_group, fill = color_group)) +
+  geom_line(aes(linetype = group),size = 1.25) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = CH4_all_translocation_T1,
+             mapping = aes(x = Depth, y = log10_CH4_mM, color = color_group),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = bay_exp_colors,name="Group") +
+  scale_fill_manual(values = bay_exp_colors,name="Group") +
+  labs(x = "Depth (cm)", y = "log10 CH4") +
+  coord_flip()+
+  scale_x_reverse()+
+  facet_wrap(~Bay, nrow = 2, 
+           labeller = labeller(Bay = c("heated" = "T1 Heated bay", 
+                                       "control" = "T1 Control bay")))+
+  theme_bw()+
+  theme(text = element_text(size = 16), 
+        axis.title = element_text(size = 16),  # axis titles (x and y labels)
+        axis.text = element_text(size = 12),   # axis tick labels
+        strip.text = element_text(size = 16),  # facet labels
+        panel.border = element_rect(linewidth = 1.25),
+        strip.background = element_rect(fill = "white", linewidth = 1.25),
+        legend.position = c(0.85, 0.85),
+legend.background = element_rect(fill = "white", colour = "grey80", linewidth = 0.5),
+legend.title = element_text(size = 13),
+legend.text = element_text(size = 11),
+legend.margin = margin(4, 6, 4, 6))
+ 
+T1_CH4_predictionplot
+
+ggsave("log10_ch4_T1.pdf", plot = T1_CH4_predictionplot, width = 15, height = 20, units = "cm", dpi = 1200)
+
+```
+
+
+# mix CH4 plots
+```{r}
+
+# --- T0 prediction ---
+T0_CH4_pred <- ggeffect(T0_CH4, terms = c("Depth", "Bay"))
+T0_CH4_pred$Bay <- T0_CH4_pred$group
+T0_CH4_pred$color_group <- paste(T0_CH4_pred$group, "Resident", sep = "_")
+T0_CH4_pred$Timepoint <- "T0"
+T0_CH4_pred$facet_label <- "T0"
+T0_CH4_pred$linetype_group <- "Resident"
+
+# --- T1 prediction ---
+T1_CH4_prediction <- predict_response(T1_CH4, terms = c("Depth", "Core", "Bay"))
+names(T1_CH4_prediction)[names(T1_CH4_prediction) == "facet"] <- "Bay"
+T1_CH4_prediction$color_group <- paste(T1_CH4_prediction$Bay, 
+                                        T1_CH4_prediction$group, sep = "_")
+T1_CH4_prediction$Timepoint <- "T1"
+T1_CH4_prediction$facet_label <- ifelse(T1_CH4_prediction$Bay == "control",
+                                         "T1 - Control bay", "T1 - Heated bay")
+T1_CH4_prediction$linetype_group <- T1_CH4_prediction$group  # "Resident" or "Translocated"
+
+# --- T0 raw data ---
+CH4_all_translocation_T0$color_group <- paste(CH4_all_translocation_T0$Bay, 
+                                               "Resident", sep = "_")
+CH4_all_translocation_T0$Timepoint <- "T0"
+CH4_all_translocation_T0$facet_label <- "T0"
+CH4_all_translocation_T0$Core <- "Resident"
+
+# --- T1 raw data ---
+CH4_all_translocation_T1$color_group <- paste(CH4_all_translocation_T1$Bay, 
+                                               CH4_all_translocation_T1$Core, sep = "_")
+CH4_all_translocation_T1$Timepoint <- "T1"
+CH4_all_translocation_T1$facet_label <- ifelse(CH4_all_translocation_T1$Bay == "control",
+                                                "T1 - Control bay", "T1 - Heated bay")
+
+# --- Align and combine prediction objects ---
+keep_cols <- c("x", "predicted", "conf.low", "conf.high", "group", 
+               "Bay", "color_group", "Timepoint", "facet_label", "linetype_group")
+
+T0_pred_combined <- T0_CH4_pred[, keep_cols]
+T1_pred_combined <- T1_CH4_prediction[, keep_cols]
+all_CH4_pred <- bind_rows(T0_pred_combined, T1_pred_combined)
+
+# --- Align and combine raw data ---
+raw_cols <- c("Depth", "log10_CH4_mM", "Bay", "Core", "color_group", "Timepoint", "facet_label")
+all_CH4_raw <- bind_rows(
+  CH4_all_translocation_T0[, raw_cols],
+  CH4_all_translocation_T1[, raw_cols]
+)
+
+# --- Set factor order ---
+panel_order <- c("T0", "T1 - Control bay", "T1 - Heated bay")
+all_CH4_pred$facet_label <- factor(all_CH4_pred$facet_label, levels = panel_order)
+all_CH4_raw$facet_label  <- factor(all_CH4_raw$facet_label,  levels = panel_order)
+
+# --- Plot ---
+CH4_combined_plot <- ggplot(all_CH4_pred, 
+                             aes(x = x, y = predicted, color = color_group, fill = color_group)) +
+  geom_line(aes(linetype = linetype_group), size = 1.25) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = all_CH4_raw,
+             mapping = aes(x = Depth, y = log10_CH4_mM, color = color_group),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = bay_exp_colors, name = "Group") +
+  scale_fill_manual(values = bay_exp_colors, name = "Group") +
+  scale_linetype_manual(values = c("Resident" = "solid", "Translocated" = "dashed"),
+                        guide = "none") +
+  labs(x = "Depth (cm)", y = expression(log[10]~CH[4])) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~facet_label, ncol = 1) +
+  theme_bw() +
+  theme(text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        strip.text = element_text(size = 16),
+        panel.border = element_rect(linewidth = 1.25),
+        strip.background = element_rect(fill = "white", linewidth = 1.25),
+        legend.position = "none")
+
+CH4_combined_plot
+
+
+
+ggsave("log10_ch4_mix.pdf", plot = CH4_combined_plot, width = 15, height = 30, units = "cm", dpi = 1200)
+
+
+```
+
+#load tube data
+```{r data}
+
+tube_total<-read_xlsx("combined_chemical_tubes_all.xlsx")
+
+tube_total$Depth[tube_total$Depth=="0-1"]<-0
+tube_total$Depth[tube_total$Depth=="0-2"]<-0
+tube_total$Depth[tube_total$Depth=="1-2"]<-1
+tube_total$Depth[tube_total$Depth=="8-9"]<-8
+tube_total$Depth[tube_total$Depth=="15-16"]<-15
+tube_total$Depth[tube_total$Depth=="22-23"]<-22
+tube_total$Depth[tube_total$Depth=="29-30"]<-29
+tube_total<-tube_total[tube_total$Depth != "BW",]
+tube_total$Depth<-as.numeric(tube_total$Depth)
+
+site_list<-c("K","J","L","I","M","N1","N2","N3","E","A","F","H2","C2","C","A2","B")
+
+tube_total$Core[tube_total$Core=="ori"]<-"Resident"
+tube_total$Core[tube_total$Core=="trans"]<-"Translocated"
+tube_total$Bay[tube_total$Bay=="Warm"]<-"heated"
+tube_total$Bay[tube_total$Bay=="Control"]<-"control"
+
+
+
+tube_T0<-tube_total[tube_total$Time=="T0",]
+tube_T1<-tube_total[tube_total$Time=="T1",]
+
+
+tube_T1_heated<-tube_T1[tube_T1$Bay=="heated",]
+tube_T1_control<-tube_T1[tube_T1$Bay=="control",]
+
+
+```
+
+
+#check tube SO4
+#T0
+```{r}
+
+str(tube_T0)
+
+tube_T0 <- tube_T0 %>%
+  mutate(SO4_mM = log10( `SO4 (mg/L)`/96))
+
+tube_T0_SO4_model<-lmer(`SO4 (mg/L)`~Bay*Depth+(1|Site), data = tube_T0)
+tube_T0_SO4_modelb<-lmer(SO4_mM~Bay*Depth+(1|Site), data = tube_T0)
+
+summary(tube_T0_SO4_model)
+anova(tube_T0_SO4_model)
+
+summary(tube_T0_SO4_modelb)
+anova(tube_T0_SO4_modelb)
+rand(tube_T0_SO4_modelb)
+#only depth sign
+
+
+pred_tube_tube_T0_SO4_modelb <- ggeffect(tube_T0_SO4_modelb, terms = c("Depth", "Bay"))
+colnames(pred_tube_tube_T0_SO4_modelb)[6]<-"Bay"
+
+
+tube_T0_SO4_modelb_rawdotplot<-ggplot(pred_tube_tube_T0_SO4_modelb , aes(x = x, y = predicted, color = Bay, fill = Bay))+
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T0,
+             mapping = aes(x = Depth, y =SO4_mM , color = Bay),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("#2166AC","#D6191B"))+  
+  scale_fill_manual(values = c("#2166AC", "#D6191B")) +  
+  theme_bw() +
+  theme(
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 20),         # Increase axis text size
+    plot.title = element_text(size = 20),        # Increase plot title size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 20)        # Increase legend text size
+  ) +
+  labs(x = "Depth (cm)", y = "log10 SO4") +
+  coord_flip()+
+  scale_x_reverse()
+
+tube_T0_SO4_modelb_rawdotplot
+
+
+
+```
+
+#T1
+```{r}
+
+str(tube_T1)
+
+tube_T1 <- tube_T1 %>%
+  mutate(SO4_mM = log10( `SO4 (mg/L)`/96))
+
+tube_T1_SO4_model<-lmer(`SO4 (mg/L)`~Bay*Depth*Core+(1|Site), data = tube_T1)
+tube_T1_SO4_modelb<-lmer(SO4_mM~Bay*Depth*Core+(1|Site), data = tube_T1)
+
+summary(tube_T1_SO4_model)
+anova(tube_T1_SO4_model)
+
+summary(tube_T1_SO4_modelb)
+anova(tube_T1_SO4_modelb)
+rand(tube_T1_SO4_modelb)
+#depth and bay:depth sign
+
+tube_T1_SO4_modelb2<-lmer(SO4_mM~Bay*Depth+Bay*Core+Depth*Core+(1|Site), data = tube_T1)
+
+summary(tube_T1_SO4_modelb2)
+anova(tube_T1_SO4_modelb2)
+rand(tube_T1_SO4_modelb2)
+
+tube_T1_SO4_model_heated<-lmer(SO4_mM~Depth*Core+(1|Site), data = tube_T1[tube_T1$Bay=="heated",])
+anova(tube_T1_SO4_model_heated)
+
+tube_T1_SO4_model_control<-lmer(SO4_mM~Depth*Core+(1|Site), data = tube_T1[tube_T1$Bay=="control",])
+anova(tube_T1_SO4_model_control)
+
+
+pred_tube_tube_T1_SO4_modelb <- ggeffect(tube_T1_SO4_modelb, terms = c("Depth","Core", "Bay"))
+names(pred_tube_tube_T1_SO4_modelb)[names(pred_tube_tube_T1_SO4_modelb)== "facet"] <- "Bay"
+
+
+
+tube_T1_SO4_modelb_rawdotplot <- ggplot(pred_tube_tube_T1_SO4_modelb, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = tube_T1,
+             mapping = aes(x = Depth, y =SO4_mM , color = Core),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = c("red4", "cyan4"),name="Core") +
+  scale_fill_manual(values = c("red4", "cyan4"),name="Core") +
+  labs(x = "Depth (cm)", y = "log10 SO4") +
+  coord_flip()+
+  scale_x_reverse()+
+  facet_wrap(~Bay,nrow = 2) +
+  theme_bw()+
+  theme(text = element_text(size = 20))
+ 
+tube_T1_SO4_modelb_rawdotplot
+
+
+
+
+
+
+```
+
+
+# mix SO4 plots
+```{r}
+
+# --- T0 prediction ---
+T0_SO4_pred <- ggeffect(tube_T0_SO4_modelb, terms = c("Depth", "Bay"))
+T0_SO4_pred$Bay <- T0_SO4_pred$group
+T0_SO4_pred$color_group <- paste(T0_SO4_pred$group, "Resident", sep = "_")
+T0_SO4_pred$Timepoint <- "T0"
+T0_SO4_pred$facet_label <- "T0"
+T0_SO4_pred$linetype_group <- "Resident"
+
+# --- T1 prediction ---
+T1_SO4_prediction <- predict_response(tube_T1_SO4_modelb, terms = c("Depth", "Core", "Bay"))
+names(T1_SO4_prediction)[names(T1_SO4_prediction) == "facet"] <- "Bay"
+T1_SO4_prediction$color_group <- paste(T1_SO4_prediction$Bay, 
+                                        T1_SO4_prediction$group, sep = "_")
+T1_SO4_prediction$Timepoint <- "T1"
+T1_SO4_prediction$facet_label <- ifelse(T1_SO4_prediction$Bay == "control",
+                                         "T1 - Control bay", "T1 - Heated bay")
+T1_SO4_prediction$linetype_group <- T1_SO4_prediction$group  # "Resident" or "Translocated"
+
+# --- T0 raw data ---
+tube_T0$color_group <- paste(tube_T0$Bay,"Resident", sep = "_")
+tube_T0$Timepoint <- "T0"
+tube_T0$facet_label <- "T0"
+tube_T0$Core <- "Resident"
+
+# --- T1 raw data ---
+tube_T1$color_group <- paste(tube_T1$Bay, tube_T1$Core, sep = "_")
+tube_T1$Timepoint <- "T1"
+tube_T1$facet_label <- ifelse(tube_T1$Bay == "control","T1 - Control bay", "T1 - Heated bay")
+
+# --- Align and combine prediction objects ---
+keep_cols <- c("x", "predicted", "conf.low", "conf.high", "group", 
+               "Bay", "color_group", "Timepoint", "facet_label", "linetype_group")
+
+T0_SO4pred_combined <- T0_SO4_pred[, keep_cols]
+T1_SO4pred_combined <- T1_SO4_prediction[, keep_cols]
+all_SO4_pred <- bind_rows(T0_SO4pred_combined, T1_SO4pred_combined)
+
+# --- Align and combine raw data ---
+raw_cols <- c("Depth", "SO4_mM", "Bay", "Core", "color_group", "Timepoint", "facet_label")
+all_SO4_raw <- bind_rows(
+  tube_T0[, raw_cols],
+  tube_T1[, raw_cols]
+)
+
+# --- Set factor order ---
+panel_order <- c("T0", "T1 - Control bay", "T1 - Heated bay")
+all_SO4_pred$facet_label <- factor(all_SO4_pred$facet_label, levels = panel_order)
+all_SO4_raw$facet_label  <- factor(all_SO4_raw$facet_label,  levels = panel_order)
+
+# --- Plot ---
+SO4_combined_plot <- ggplot(all_SO4_pred, 
+                             aes(x = x, y = predicted, color = color_group, fill = color_group)) +
+  geom_line(aes(linetype = linetype_group), size = 1.25) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, colour = NA) +
+  geom_point(data = all_SO4_raw,
+             mapping = aes(x = Depth, y = SO4_mM, color = color_group),
+             position = position_jitter(width = 0.1), alpha = 0.5,
+             inherit.aes = FALSE) +
+  scale_colour_manual(values = bay_exp_colors, name = "Group") +
+  scale_fill_manual(values = bay_exp_colors, name = "Group") +
+  scale_linetype_manual(values = c("Resident" = "solid", "Translocated" = "dashed"),
+                        guide = "none") +
+  labs(x = "Depth (cm)", y = expression(log[10]~SO[4])) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~facet_label, ncol = 1) +
+  theme_bw() +
+  theme(text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        strip.text = element_text(size = 16),
+        panel.border = element_rect(linewidth = 1.25),
+        strip.background = element_rect(fill = "white", linewidth = 1.25),
+        legend.position = "none")
+
+SO4_combined_plot
+
+
+
+ggsave("log10_so4_mix.pdf", plot = SO4_combined_plot, width = 15, height = 30, units = "cm", dpi = 1200)
+
+
+#plot CH4 and SO4 together
+CH4_SO4_mixed_lineplot <- ggarrange(
+  CH4_combined_plot,
+  SO4_combined_plot,  
+  labels = c("a", "b"), 
+  font.label = list(size = 18),
+  ncol  = 2,
+  widths = c(1, 1)
+)
+
+CH4_SO4_mixed_lineplot
+
+ggsave("CH4_SO4_mixed_lineplot_fig3.pdf", plot = CH4_SO4_mixed_lineplot, width = 30, height = 30, units = "cm", dpi = 1200)
+
+```
+
+```{r}
+
+ mix_SO4_tube<-ggarrange(
+  tube_T0_SO4_modelb_rawdotplot,  
+  tube_T1_SO4_modelb_rawdotplot,
+  labels = c("A", "B"), 
+  font.label = list(size = 18),
+   legend = "right", ncol =2)
+
+mix_SO4_tube
+
+ggsave("log10_so4_mix_tube.pdf", plot = mix_SO4_tube, width = 40, height = 25, units = "cm", dpi = 1200)
+
+ggsave("log10_so4_mix_tube.jpg", plot = mix_SO4_tube, width = 40, height = 25, units = "cm", dpi = 1200)
+
+```
+
+
+
+
+
+
